@@ -6,11 +6,37 @@ org 100h
 
 locals @@
 
+HotkeyPressed   equ '#'
+HotkeyUnPressed equ '$'
+F3Hotkey	equ 03Dh        ; F3 scan code
+OneIntSize	equ 4h		; One interruption in interrupt table include segment register (cs) and offset (ip) = 4 byte
+
+;-------------------------------------------------
+; Macro to replace standart interruption and save it
+; IntNamePos - position of interruption - for example 08h * 4
+; ReplaceHandler - Name of procedure that will be replaced in interruption table
+; SaveHandler    - Name of buffer, where will be saved info about system handler of interruption
+; Note: You should write cli - sti by your own to correct work, and es should be zeroed!
+;
+ReplaceSaveInt  macro IntNamePos, ReplaceHandler, SaveHandler
+		mov ax, es:[IntNamePos * 4]
+		mov word ptr SaveHandler, ax
+
+		mov es:[IntNamePos * 4], offset ReplaceHandler
+
+		mov ax, es:[IntNamePos * 4 + 2]
+		mov word ptr SaveHandler + 2, ax
+		push cs
+		pop ax
+		mov es:[IntNamePos * 4 + 2], ax
+
+		endm
+
+			
 
 start:
 
-                call SaveSysHandler08h09h
-                call Overwrite09h
+                call ReplaceSave08h09h
 
 
                 mov ax, 3100h	; Exit, but stay resident
@@ -23,34 +49,12 @@ start:
 
 
 NewHandler08h	proc
-	;; iret
+		push bx
+		lea bx, HotkeyPress
+		cmp byte ptr cs:[bx], HotkeyUnpressed
+		je @@CallSys08h
 
-		db 0EAh			; jmp far
-		SysHandler08h dd 0
-
-		endp
-
-NewHandler09h	proc
-		push ax
-
-		in al, 60h
-		cmp al, 03Dh
-		je @@WriteRegInfo
-
-		pop ax
-
-		db 0EAh
-		SysHandler09h dd 0
-
-
-@@WriteRegInfo:
-		push bx cx dx bp si di ds es
-			;; xor bx, bx
-		;; xor bx, bx
-		;; mov es, bx
-		;; mov bx, 08h * 4
-
-		;; call Overwrite08h
+		push ax cx dx bp di si ds es
 
 		mov ah, 01Eh
 		mov dl, 0Ah
@@ -69,10 +73,54 @@ NewHandler09h	proc
 
 		call DrawBox
 
+		pop es ds si di bp dx cx ax
+
+@@CallSys08h:
+		pop bx
+		db 0EAh			; jmp far
+		SysHandler08h dd 0
+		endp
+
+NewHandler09h	proc
+		push ax
+
+		in  al, 60h	; Check 60h port
+		cmp al, F3Hotkey
+		je @@WriteRegInfo
+
+		pop ax
+
+		db 0EAh		; Jump far ptr SysHandler09h
+		SysHandler09h dd 0
 
 
+@@WriteRegInfo:
+		push bx
+
+		lea bx, HotkeyPress
+		cmp byte ptr cs:[bx], HotkeyPressed
+		je @@SecondPress
+
+	; 	If first press is detected
+	;
+		mov byte ptr cs:[bx], HotkeyPressed
+		jmp @@InterruptEnd
+
+		;; call Restore08h
+		;; jmp @@Skip
 
 
+@@SecondPress:
+		mov byte ptr cs:[bx], HotkeyUnPressed
+
+			;; xor bx, bx
+      	        ;; xor bx, bx
+		;; mov es, bx
+		;; mov bx, 08h * 4
+
+		;; call Overwrite08h
+
+@@InterruptEnd:
 		in al, 061h
 		mov ah, al
 
@@ -85,12 +133,13 @@ NewHandler09h	proc
 		mov al, 020h
 		out 020h, al
 
-		pop es ds di si bp dx cx bx ax
+		pop bx ax
 		iret
 
                 BoxFill db '.12345678'
 		String  db '1$'
 
+		HotkeyPress db HotkeyUnPressed
 
 NewHandler09h	endp
 
@@ -104,25 +153,29 @@ NewHandler09h	endp
 ;-------------------------------------------------
 
 
-SaveSysHandler08h09h proc
+ReplaceSave08h09h proc
+
+		cli
 		xor bx, bx
 		mov es, bx
-		mov bx, 08h * 4
 
-		mov ax, es:[bx]
-		mov word ptr SysHandler08h, ax
+		; 	interruption name, new interruption handler (procedure name), buffer to save standart interruption
+		;		|			|					  |
+		;		V	----------------+					  |
+		;			V						          |
+		ReplaceSaveInt 08h, NewHandler08h, SysHandler08h ; <------------------------------+
 
-		mov ax, es:[bx + 2]
-		mov word ptr SysHandler08h+2, ax
+	;; SaveSysHandler 09h
+		;; mov ax, es:[bx]
+		;; mov word ptr SysHandler08h, ax    ; Save System handler of 08h interruption (cs and ip)
 
-		add bx, 4
+		;; mov ax, es:[bx + 2]
+		;; mov word ptr SysHandler08h+2, ax
 
-		mov ax, es:[bx]
-		mov word ptr SysHandler09h, ax
+		ReplaceSaveInt 09h, NewHandler09h, SysHandler09h
 
-		mov ax, es:[bx + 2]
-		mov word ptr SysHandler09h+2, ax
 		ret
+		sti
 		endp
 
 ;-------------------------------------------------
@@ -165,6 +218,23 @@ Overwrite09h	proc
 		sti
 		ret
 Overwrite09h    endp
+
+
+;; Restore08h	proc
+;; 		cli
+
+;; 		xor bx, bx
+;; 		mov es, bx
+;; 		mov bx, 08h * 4
+
+;; 		mov ax, word ptr SysHandler08h
+;; 		mov word ptr es:[bx], ax
+;; 		mov ax, word ptr SysHandler08h + 2
+;; 		mov word ptr es:[bx + 2], ax
+
+;; 		sti
+;; 		ret
+;; 		endp
 
 include .\4.ASM
 
