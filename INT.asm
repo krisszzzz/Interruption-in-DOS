@@ -6,16 +6,56 @@ org 100h
 
 locals @@
 
-HotkeyPressed   equ '#'
-HotkeyUnPressed equ '$'
-F3Hotkey	equ 03Dh        ; F3 scan code
-OneIntSize	equ 004h	; One interruption in interrupt table include segment register (cs) and offset (ip) = 4 byte
-TableColor      equ 01Ah
-TableWidth	equ 011h
-TableHeight	equ 00Ah
-TablePos	equ 140*2
-ColumnPos	equ 81*2
-AXPos		equ TablePos+ColumnPos + 8
+HotkeyPressed    equ '#'
+HotkeyUnPressed  equ '$'
+F3Hotkey	 equ 03Dh        ; F3 scan code
+OneIntSize	 equ 004h	; One interruption in interrupt table include segment register (cs) and offset (ip) = 4 byte
+TableColor       equ 01Ah
+TableWidth	 equ 011h
+TableHeight	 equ 00Ah
+TablePos	 equ 140*2
+ColumnPos	 equ 81*2
+AXPos		 equ TablePos+ColumnPos + 8
+
+.SaveBuffer	macro BufferName
+		mov bx, 0B800h	; Change ds = es = 0B800h
+		mov ds, bx
+
+		mov bx, cs	; Change es = cs
+		mov es, bx
+
+		mov cx, TableWidth
+		mov bx, TableHeight
+
+		mov si, TablePos
+
+		lea di, BufferName
+		call SaveTable
+
+		endm
+;-------------------------------------------------
+; Macros to output buffer to videobuffer
+; Destr: BX, DS, ES, CX, BX, DI, SI
+
+
+
+
+.OutBuffer	macro BufferName
+		mov bx, cs
+		mov ds, bx
+
+		mov bx, 0B800h
+		mov es, bx
+
+		mov cx, TableWidth
+		mov bx, TableHeight
+
+		mov di, TablePos
+		lea si, BufferName
+
+		call OutTable
+
+		endm
 
 ;-------------------------------------------------
 ; Macro to replace standart interruption and save it
@@ -32,8 +72,10 @@ ReplaceSaveInt  macro IntNamePos, ReplaceHandler, SaveHandler
 
 		mov ax, es:[IntNamePos * OneIntSize + 2]
 		mov word ptr SaveHandler + 2, ax
-		push cs
+
+		push cs		; AX = CS
 		pop ax
+
 		mov es:[IntNamePos * OneIntSize + 2], ax
 
 		endm
@@ -43,6 +85,7 @@ ReplaceSaveInt  macro IntNamePos, ReplaceHandler, SaveHandler
 start:
 
                 call ReplaceSave08h09h
+
 
 
                 mov ax, 3100h	; Exit, but stay resident
@@ -63,58 +106,21 @@ NewHandler08h	proc
 
 		je  @@CallSys08h
 
-		;; pop  bx			     Get old value of BX
+		pop  bx		; Get Old bx value
+		push bx		; Push them back
+
 		push ax cx dx bp di si ds es ; Register that will be used
 
-		;; push ax bx cx dx bp di si ds es ; Register that need to output their value
+		push ax bx cx dx si di es ds
 
-		push cx
+@@OutputReg:
 
-		push cs		; To correct work
-		pop ds		; DS and ES should be CS
-
-		push cs
-		pop es
+		lea si, DisplayBuffer
 
 
-		mov dl, TableWidth
-		mov dh, TableHeight
+		loop @@OutputReg
 
-		lea si, BoxFill
-		lea cx, UselessString
-		xor bp, bp	; Bp is UselessString position in videosegment
-				; it could be any value
-		mov di, TablePos
-
-		;; call DrawBox
-
-		mov cx, 02h
-		lea si, Registers
-
-		mov di, TablePos + ColumnPos
-
-		call WriteInColumn
-
-		mov dl, 10h	; 16-Radix
-
-		pop bx
-		xor cx, cx
-		xor dh, dh
-		lea di, RegValue
-
-		call itoa
-
-		mov ah, TableColor
-		mov di, AXPos
-		lea si, RegValue
-
-		mov bx, VideoSeg
-		mov es, bx
-
-
-		call OutHex
-
-
+		.OutBuffer DisplayBuffer
 
 		pop es ds si di bp dx cx ax
 
@@ -124,8 +130,6 @@ NewHandler08h	proc
 		SysHandler08h dd 0
 
 		Registers      db 'AXBXCXDXSIDIESDS$'
-                BoxFill        db ' ∫∫»Õº…Õª' ; Element used to draw the box
-		UselessString  db '$'	      ; This string need only for correct work DrawBox procedure
 		RegValue       db 5 dup(?)
 
 		endp
@@ -137,6 +141,7 @@ NewHandler09h	proc
 
 		in  al, 60h	; Check 60h port
 		cmp al, F3Hotkey
+
 		je @@WriteRegInfo
 
 		pop ax
@@ -146,15 +151,47 @@ NewHandler09h	proc
 
 
 @@WriteRegInfo:
-		push bx
+		push bx cx dx bp si di ds es
 
 		lea bx, HotkeyPress
 		cmp byte ptr cs:[bx], HotkeyPressed
 		je @@SecondPress
 
-	; 	If first press is detected
-	;
 		mov byte ptr cs:[bx], HotkeyPressed
+
+	;; 	First press
+		.SaveBuffer BackBuffer
+
+	;; --------------------------------------
+		push cs		; To correct work
+		pop ds		; DS and ES should be CS
+
+		mov bx, 0B800h	; Setup to output table
+		mov es, bx
+
+		mov ah, TableColor
+
+		mov dl, TableWidth
+		mov dh, TableHeight
+
+		lea si, BoxFill
+		lea cx, UselessString
+		xor bp, bp	; Bp is UselessString position in videosegment
+				; it could be any value
+		mov di, TablePos
+
+		call DrawBox	; Draw simple box
+
+		mov cx, 02h
+		lea si, Registers
+
+		mov di, TablePos + ColumnPos
+
+		call WriteInColumn
+
+		.SaveBuffer DisplayBuffer ; Save Table
+
+
 		jmp @@InterruptEnd
 
 @@SecondPress:
@@ -173,10 +210,15 @@ NewHandler09h	proc
 		mov al, 020h
 		out 020h, al
 
-		pop bx ax
+		pop es ds di si bp dx cx bx ax
 		iret
 
-		HotkeyPress db HotkeyUnPressed
+		HotkeyPress   db HotkeyUnPressed
+		BackBuffer    db 220 dup(?)
+		DisplayBuffer db 220 dup(?)
+
+                BoxFill        db ' ∫∫»Õº…Õª' ; Element used to draw the box
+		UselessString  db '$'	      ; This string need only for correct work DrawBox procedure
 
 NewHandler09h	endp
 
@@ -204,8 +246,8 @@ ReplaceSave08h09h proc
 
 		ReplaceSaveInt 09h, NewHandler09h, SysHandler09h
 
-		ret
 		sti
+		ret
 		endp
 
 

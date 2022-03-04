@@ -19,12 +19,11 @@ MinSymCount equ  00Bh
 Color       equ  004h   ; Red color
 
 
-
 .vstosw         macro
-                nop
+;                nop
                 mov es:[di], ax
                 add di, 000A0h ; = 160d
-                nop
+;                nop
                 endm
 
 .wait           macro
@@ -40,29 +39,85 @@ Color       equ  004h   ; Red color
                 nop
                 endm
 
-;Start:
-        ;mov ah, 04Eh
-		;mov dl, 0Ah
-		;mov dh, 0Fh
+.BufferExchangeOp macro ProcedureName, VideoIndexReg
 
-		;lea si, BoxFill
-		;lea cx, String
-		;mov bp, 70*2 + 80*2 + 2
+ ProcedureName  proc
 
-		;mov bx, 0b800h
-		;mov es, bx
+                mov dx, cx
+                jmp @@SaveRow
 
-		;mov di, 70*2
+@@GoToNextRow:
+                mov cx, dx
+                add VideoIndexReg, 80*2
 
-        ;call DrawBox
-        ;mov ax, 4c00h
-        ;int 21h
+                sub VideoIndexReg, cx
+                sub VideoIndexReg, cx
+
+@@SaveRow:
+                rep movsw
+
+                sub bx, 1
+                cmp bx, 0
+                ja @@GoToNextRow
+
+                ret
+                endp
+
+                endm
+
+COMMENT /
+
+Start:
+        mov ah, 04Eh
+		mov dl, 0Ah
+		mov dh, 0Fh
+
+		lea si, BoxFill
+		lea cx, String
+		mov bp, 70*2 + 80*2 + 2
+
+		mov bx, 0b800h
+		mov es, bx
+
+		mov di, 70*2
+
+        call DrawBox
+
+        mov bx, es
+        mov ds, bx
+
+        mov bx, cs
+        mov es, bx
+
+        mov cx, 0Ah
+        mov bx, 0Fh
+
+        mov si, 70*2
+        lea di, Buffer
+
+        call SaveTable
+
+        push ds
+        push es
+        pop  ds
+        pop  es
+
+        lea si, Buffer
+        mov di, 40*2
+        mov cx, 0Ah
+        mov bx, 0Fh
+
+        call OutTable
+
+        mov ax, 4c00h
+        int 21h
+        Buffer  db 300 dup(?)
         ;BoxFill db '.ººèí¼éí»'
-        ;BoxFill db '.12345678'
-		;String  db 'f$'
+        BoxFill db '.12345678'
+		String  db 'f$'
 
 
-
+/
 
 ;-------------------------------------------------
 ; Proccess comand line arguments to correct work for DrawBox function
@@ -302,8 +357,8 @@ DrawHorLine     endp
 ; Draw lines with same size in column
 ; Entry: AH - color of lines
 ;        CX - length of each line
-;        SI - address of array containing lines to output (This string should be ended with '$')
-;        DI - adress of start of first line in video segment
+;       DS:[SI] - address of array containing lines to output (This string should be ended with '$')
+;       ES:[DI] - adress of start of first line in video segment
 ;        ES = video segment adrress (0b800h)
 ; Ret: None
 ; Destr: AL, CX, DX, SI, DI
@@ -337,34 +392,23 @@ WriteInColumn   proc
 ; Save symbols in table from videobuffer to buffer
 ; Entry: CX - width of box
 ;        BX - length of box
-;        DI - left corner of box
-;        SI - buffer address
+;   DS:[SI] - Source (Table in videobuffer)
+;   ES:[DI] - Destination buffer
 
-SaveTable       proc
-                mov dx, cx
-                jmp @@SaveRow
+;   Destr: DX, CX, BX, SI, DI
 
-@@GoToNextRow:
-                mov cx, dx
-                add di, 80*2
-                sub di, cx
-                sub di, cx
+.BufferExchangeOp SaveTable, si ; See the macro in the begining of program
+                                ; Generate SaveTable procedure to save table into buffer
 
-@@SaveRow:
-                mov al, byte ptr es:[di]
-                add di, 2
+;-------------------------------------------------
+; Entry: CX  - width of box
+;        BX  - length of box
+;    DS:[SI] - Source (Table in buffer)
+;    ES:[DI] - Destination videobuffer (table left corner)
 
-                mov ds:[si], al
-                add si, 1
+; Destr: DX, CX, BX, SI, DI
 
-                loop @@SaveRow
-
-                sub bx, 1
-                cmp bx, 0
-                ja @@GotoNextRow
-
-                ret
-                endp
+.BufferExchangeOp OutTable, di
 
 ;-------------------------------------------------
 ; Output string to videobuffer
@@ -373,6 +417,7 @@ SaveTable       proc
 ;        BP - string to output position
 ;        ES = Video segment (0B800h)
 ; Destr: AL, BP, DI
+
 
 OutString       proc
 @@Puts:
