@@ -9,7 +9,11 @@ locals @@
 HotkeyPressed   equ '#'
 HotkeyUnPressed equ '$'
 F3Hotkey	equ 03Dh        ; F3 scan code
-OneIntSize	equ 4h		; One interruption in interrupt table include segment register (cs) and offset (ip) = 4 byte
+OneIntSize	equ 004h	; One interruption in interrupt table include segment register (cs) and offset (ip) = 4 byte
+TableColor      equ 01Ah
+TableWidth	equ 011h
+TableHeight	equ 00Ah
+TablePos	equ 140*2
 
 ;-------------------------------------------------
 ; Macro to replace standart interruption and save it
@@ -19,16 +23,16 @@ OneIntSize	equ 4h		; One interruption in interrupt table include segment registe
 ; Note: You should write cli - sti by your own to correct work, and es should be zeroed!
 ;
 ReplaceSaveInt  macro IntNamePos, ReplaceHandler, SaveHandler
-		mov ax, es:[IntNamePos * 4]
+		mov ax, es:[IntNamePos * OneIntSize]
 		mov word ptr SaveHandler, ax
 
-		mov es:[IntNamePos * 4], offset ReplaceHandler
+		mov es:[IntNamePos * OneIntSize], offset ReplaceHandler
 
-		mov ax, es:[IntNamePos * 4 + 2]
+		mov ax, es:[IntNamePos * OneIntSize + 2]
 		mov word ptr SaveHandler + 2, ax
 		push cs
 		pop ax
-		mov es:[IntNamePos * 4 + 2], ax
+		mov es:[IntNamePos * OneIntSize + 2], ax
 
 		endm
 
@@ -49,29 +53,42 @@ start:
 
 
 NewHandler08h	proc
+
 		push bx
+
 		lea bx, HotkeyPress
 		cmp byte ptr cs:[bx], HotkeyUnpressed
-		je @@CallSys08h
+
+		je  @@CallSys08h
 
 		push ax cx dx bp di si ds es
 
-		mov ah, 01Eh
-		mov dl, 0Ah
-		mov dh, 0Ah
-
-		lea si, BoxFill
-		lea cx, String
-		mov bp, 70*2 + 80*2 + 2
-
-		mov bx, 0B800h
-		mov es, bx
-
-		mov di, 60*2
 		push cs
 		pop ds
 
+
+		mov bx, VideoSeg
+		mov es, bx
+
+		mov ah, TableColor
+
+		mov dl, TableWidth
+		mov dh, TableHeight
+
+		lea si, BoxFill
+		lea cx, String
+		mov bp, 70*2 + 80*2
+
+		mov di, TablePos
+
 		call DrawBox
+
+		mov cx, 02h
+		lea si, Registers
+
+		mov di, TablePos + 81*2
+
+		call WriteInColumn
 
 		pop es ds si di bp dx cx ax
 
@@ -79,8 +96,15 @@ NewHandler08h	proc
 		pop bx
 		db 0EAh			; jmp far
 		SysHandler08h dd 0
+
+		Registers db 'AXBXCXDXSIDIESDS$'
+                BoxFill   db ' ∫∫»Õº…Õª' ; Element used to draw the box
+		String    db '$'
+
 		endp
 
+;-------------------------------------------------
+;
 NewHandler09h	proc
 		push ax
 
@@ -106,19 +130,8 @@ NewHandler09h	proc
 		mov byte ptr cs:[bx], HotkeyPressed
 		jmp @@InterruptEnd
 
-		;; call Restore08h
-		;; jmp @@Skip
-
-
 @@SecondPress:
 		mov byte ptr cs:[bx], HotkeyUnPressed
-
-			;; xor bx, bx
-      	        ;; xor bx, bx
-		;; mov es, bx
-		;; mov bx, 08h * 4
-
-		;; call Overwrite08h
 
 @@InterruptEnd:
 		in al, 061h
@@ -136,16 +149,13 @@ NewHandler09h	proc
 		pop bx ax
 		iret
 
-                BoxFill db '.12345678'
-		String  db '1$'
-
 		HotkeyPress db HotkeyUnPressed
 
 NewHandler09h	endp
 
 
 ;-------------------------------------------------
-; Save system interuption 08h and 09h in
+; Replace 08h and 09h in interruption table and save system 08h and 09h
 ; Entry: None
 ; Ret:   None
 ; Destr: BX, ES, AX
@@ -165,76 +175,12 @@ ReplaceSave08h09h proc
 		;			V						          |
 		ReplaceSaveInt 08h, NewHandler08h, SysHandler08h ; <------------------------------+
 
-	;; SaveSysHandler 09h
-		;; mov ax, es:[bx]
-		;; mov word ptr SysHandler08h, ax    ; Save System handler of 08h interruption (cs and ip)
-
-		;; mov ax, es:[bx + 2]
-		;; mov word ptr SysHandler08h+2, ax
-
 		ReplaceSaveInt 09h, NewHandler09h, SysHandler09h
 
 		ret
 		sti
 		endp
 
-;-------------------------------------------------
-; Overwrite 08h System interuption
-; Entry: BX = 08h * 4
-; 	 ES = 0000h
-; Ret: None
-; Destr: AX
-;-------------------------------------------------
-
-
-Overwrite08h	proc
-		cli
-
-		mov word ptr es:[bx], offset NewHandler08h
-		push cs
-		pop  ax
-		mov  word ptr es:[bx+2], ax
-
-		sti
-		ret
-Overwrite08h	endp
-
-;-------------------------------------------------
-; Overwrite 09h System interuption
-; Entry: BX = 09h * 4
-; 	 ES = 0000h
-; Ret: None
-; Destr: AX
-;-------------------------------------------------
-
-Overwrite09h	proc
-		cli
-
-		mov word ptr es:[bx], offset NewHandler09h
-		push cs
-		pop ax
-		mov word ptr es:[bx+2], ax
-
-		sti
-		ret
-Overwrite09h    endp
-
-
-;; Restore08h	proc
-;; 		cli
-
-;; 		xor bx, bx
-;; 		mov es, bx
-;; 		mov bx, 08h * 4
-
-;; 		mov ax, word ptr SysHandler08h
-;; 		mov word ptr es:[bx], ax
-;; 		mov ax, word ptr SysHandler08h + 2
-;; 		mov word ptr es:[bx + 2], ax
-
-;; 		sti
-;; 		ret
-;; 		endp
 
 include .\4.ASM
 

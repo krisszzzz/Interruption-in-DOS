@@ -131,7 +131,6 @@ CmdProc         proc
 ;        DH - height of box
 ;        SI - address of 9-byte massive of symbols (|\+-++-+)
 ;        CX - address of string to output (DS:[CX])
-;        BX = DS as default
 ;        BP - string to output position
 ;        ES - videoseg addr (ob800h)
 ;        DI - left corner of box
@@ -308,6 +307,41 @@ DrawHorLine     proc
 @@ret:          ret
                 H_Error_Msg  db 'Fatal error: DrawHorLine procedure cannot work, if cx <= 2$'
 DrawHorLine     endp
+
+;-------------------------------------------------
+; Draw lines with same size in column
+; Entry: AH - color of lines
+;        CX - length of each line
+;        SI - address of array containing lines to output (This string should be ended with '$')
+;        DI - adress of start of first line in video segment
+;        ES = video segment adrress (0b800h)
+; Ret: None
+; Destr: AL, CX, DX, SI, DI
+
+WriteInColumn   proc
+                mov dx, cx  ; Temp for cx
+
+@@DrawColumn:
+
+                lodsb
+                cmp al, '$'
+                je @@Exit
+
+                stosw
+
+                loop @@DrawColumn
+
+                mov cx, dx
+
+                sub di, cx        ; Go back for length of line. Note that we subbed 2 times because
+                                  ; videomemory has two byte for one symbol
+                sub di, cx
+                add di, 80*2
+
+                jmp @@DrawColumn
+@@Exit:
+                ret
+                endp
 
 
 ;------------------------------------------------
