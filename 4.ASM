@@ -196,19 +196,9 @@ DrawBox         proc
                 mov  cl, dl
                 call DrawHorLine    ; Write upper horizontal line
                 pop  di
+                call OutString
 
-@@Puts:
-                mov al, byte ptr ds:[di]  ; Exchange buffer from command line to videomemory
-                cmp al, '$'               ; Go exit if Command line is ended
-                je @@exit
-
-                mov es:[bp], ax           ;
-                add bp, 2                 ; Go to the next symbol in videomemory
-                add di, 1                 ; Go to the next symbol in command line
-
-                jmp @@Puts
-
-@@exit:         ret
+                ret
 
 DrawBox         endp
 
@@ -343,6 +333,62 @@ WriteInColumn   proc
                 ret
                 endp
 
+;-------------------------------------------------
+; Save symbols in table from videobuffer to buffer
+; Entry: CX - width of box
+;        BX - length of box
+;        DI - left corner of box
+;        SI - buffer address
+
+SaveTable       proc
+                mov dx, cx
+                jmp @@SaveRow
+
+@@GoToNextRow:
+                mov cx, dx
+                add di, 80*2
+                sub di, cx
+                sub di, cx
+
+@@SaveRow:
+                mov al, byte ptr es:[di]
+                add di, 2
+
+                mov ds:[si], al
+                add si, 1
+
+                loop @@SaveRow
+
+                sub bx, 1
+                cmp bx, 0
+                ja @@GotoNextRow
+
+                ret
+                endp
+
+;-------------------------------------------------
+; Output string to videobuffer
+; Entry: AH - color of string
+;        DI - pointer to string (with terminate symbol $)
+;        BP - string to output position
+;        ES = Video segment (0B800h)
+; Destr: AL, BP, DI
+
+OutString       proc
+@@Puts:
+                mov al, byte ptr ds:[di]  ; Exchange buffer from command line to videomemory
+                cmp al, '$'               ; Go exit if Command line is ended
+                je @@exit
+
+                mov es:[bp], ax           ;
+                add bp, 2                 ; Go to the next symbol in videomemory
+                add di, 1                 ; Go to the next symbol in command line
+
+                jmp @@Puts
+
+@@exit:
+                ret
+                endp
 
 ;------------------------------------------------
 ;------------------------------------------------  

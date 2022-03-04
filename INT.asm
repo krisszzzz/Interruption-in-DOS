@@ -14,6 +14,8 @@ TableColor      equ 01Ah
 TableWidth	equ 011h
 TableHeight	equ 00Ah
 TablePos	equ 140*2
+ColumnPos	equ 81*2
+AXPos		equ TablePos+ColumnPos + 8
 
 ;-------------------------------------------------
 ; Macro to replace standart interruption and save it
@@ -61,34 +63,58 @@ NewHandler08h	proc
 
 		je  @@CallSys08h
 
-		push ax cx dx bp di si ds es
+		;; pop  bx			     Get old value of BX
+		push ax cx dx bp di si ds es ; Register that will be used
+
+		;; push ax bx cx dx bp di si ds es ; Register that need to output their value
+
+		push cx
+
+		push cs		; To correct work
+		pop ds		; DS and ES should be CS
 
 		push cs
-		pop ds
+		pop es
 
-
-		mov bx, VideoSeg
-		mov es, bx
-
-		mov ah, TableColor
 
 		mov dl, TableWidth
 		mov dh, TableHeight
 
 		lea si, BoxFill
-		lea cx, String
-		mov bp, 70*2 + 80*2
-
+		lea cx, UselessString
+		xor bp, bp	; Bp is UselessString position in videosegment
+				; it could be any value
 		mov di, TablePos
 
-		call DrawBox
+		;; call DrawBox
 
 		mov cx, 02h
 		lea si, Registers
 
-		mov di, TablePos + 81*2
+		mov di, TablePos + ColumnPos
 
 		call WriteInColumn
+
+		mov dl, 10h	; 16-Radix
+
+		pop bx
+		xor cx, cx
+		xor dh, dh
+		lea di, RegValue
+
+		call itoa
+
+		mov ah, TableColor
+		mov di, AXPos
+		lea si, RegValue
+
+		mov bx, VideoSeg
+		mov es, bx
+
+
+		call OutHex
+
+
 
 		pop es ds si di bp dx cx ax
 
@@ -97,9 +123,10 @@ NewHandler08h	proc
 		db 0EAh			; jmp far
 		SysHandler08h dd 0
 
-		Registers db 'AXBXCXDXSIDIESDS$'
-                BoxFill   db ' ∫∫»Õº…Õª' ; Element used to draw the box
-		String    db '$'
+		Registers      db 'AXBXCXDXSIDIESDS$'
+                BoxFill        db ' ∫∫»Õº…Õª' ; Element used to draw the box
+		UselessString  db '$'	      ; This string need only for correct work DrawBox procedure
+		RegValue       db 5 dup(?)
 
 		endp
 
@@ -182,7 +209,8 @@ ReplaceSave08h09h proc
 		endp
 
 
-include .\4.ASM
+include ./4.ASM
+include ./STRING1.ASM
 
 ProgEnd:
 
