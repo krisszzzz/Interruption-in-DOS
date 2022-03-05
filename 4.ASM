@@ -430,7 +430,6 @@ OutString       proc
                 add di, 1                 ; Go to the next symbol in command line
 
                 jmp @@Puts
-
 @@exit:
                 ret
                 endp

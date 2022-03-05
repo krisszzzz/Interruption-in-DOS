@@ -10,15 +10,18 @@ HotkeyPressed    equ '#'
 HotkeyUnPressed  equ '$'
 F3Hotkey	 equ 03Dh        ; F3 scan code
 OneIntSize	 equ 004h	; One interruption in interrupt table include segment register (cs) and offset (ip) = 4 byte
+
 TableColor       equ 01Ah
-TableWidth	 equ 011h
+TableWidth	 equ 00Bh
+
 TableHeight	 equ 00Ah
 TablePos	 equ 140*2
 ColumnPos	 equ 81*2
-AXPos		 equ TablePos+ColumnPos + 8
+AXInBuffPos	 equ TableWidth*2 + 8
+RegisterCount	 equ 008h
 
 .SaveBuffer	macro BufferName
-		mov bx, 0B800h	; Change ds = es = 0B800h
+		mov bx, 0B800h	; Change ds = 0B800h
 		mov ds, bx
 
 		mov bx, cs	; Change es = cs
@@ -36,8 +39,6 @@ AXPos		 equ TablePos+ColumnPos + 8
 ;-------------------------------------------------
 ; Macros to output buffer to videobuffer
 ; Destr: BX, DS, ES, CX, BX, DI, SI
-
-
 
 
 .OutBuffer	macro BufferName
@@ -87,7 +88,6 @@ start:
                 call ReplaceSave08h09h
 
 
-
                 mov ax, 3100h	; Exit, but stay resident
                 mov dx, offset ProgEnd
                 shr dx, 4
@@ -106,21 +106,51 @@ NewHandler08h	proc
 
 		je  @@CallSys08h
 
+		; --------------------------
+		; Start of New handler
+
 		pop  bx		; Get Old bx value
 		push bx		; Push them back
 
 		push ax cx dx bp di si ds es ; Register that will be used
 
-		push ax bx cx dx si di es ds
+		push ax bx cx dx si di es ds ; Register to output info
+
+
+		mov bp, RegisterCount
+
+		;; push cs
+		;; pop  ds
+
+		push cs
+		pop  es
+
 
 @@OutputReg:
+		mov dl, 10h	; 16 radix system
+		pop bx		; Get Registers value
 
-		lea si, DisplayBuffer
+		lea di, RegValue
 
+		call itoa
 
-		loop @@OutputReg
+		lea si, RegValue
+		mov di, offset DisplayBuffer + AXInBuffPos
 
-		.OutBuffer DisplayBuffer
+		mov ax, TableWidth * 2
+		dec bp
+
+		mul bp
+		add di, ax
+
+		mov ah, TableColor
+
+		call OutHex
+
+		cmp bp, 0
+		ja @@OutputReg
+
+ 		.OutBuffer DisplayBuffer
 
 		pop es ds si di bp dx cx ax
 
@@ -128,9 +158,7 @@ NewHandler08h	proc
 		pop bx
 		db 0EAh			; jmp far
 		SysHandler08h dd 0
-
-		Registers      db 'AXBXCXDXSIDIESDS$'
-		RegValue       db 5 dup(?)
+		RegValue      db 5 dup(?)
 
 		endp
 
@@ -154,17 +182,17 @@ NewHandler09h	proc
 		push bx cx dx bp si di ds es
 
 		lea bx, HotkeyPress
+
 		cmp byte ptr cs:[bx], HotkeyPressed
 		je @@SecondPress
 
 		mov byte ptr cs:[bx], HotkeyPressed
 
+	;; --------------------------------------
 	;; 	First press
 		.SaveBuffer BackBuffer
-
-	;; --------------------------------------
-		push cs		; To correct work
-		pop ds		; DS and ES should be CS
+		push cs
+		pop ds
 
 		mov bx, 0B800h	; Setup to output table
 		mov es, bx
@@ -175,6 +203,7 @@ NewHandler09h	proc
 		mov dh, TableHeight
 
 		lea si, BoxFill
+
 		lea cx, UselessString
 		xor bp, bp	; Bp is UselessString position in videosegment
 				; it could be any value
@@ -191,11 +220,11 @@ NewHandler09h	proc
 
 		.SaveBuffer DisplayBuffer ; Save Table
 
-
 		jmp @@InterruptEnd
 
 @@SecondPress:
 		mov byte ptr cs:[bx], HotkeyUnPressed
+		.OutBuffer BackBuffer
 
 @@InterruptEnd:
 		in al, 061h
@@ -216,9 +245,10 @@ NewHandler09h	proc
 		HotkeyPress   db HotkeyUnPressed
 		BackBuffer    db 220 dup(?)
 		DisplayBuffer db 220 dup(?)
+		Registers     db 'AXBXCXDXSIDIESDS$'
 
                 BoxFill        db ' ∫∫»Õº…Õª' ; Element used to draw the box
-		UselessString  db '$'	      ; This string need only for correct work DrawBox procedure
+		UselessString  db '$$$'	      ; This string need only for correct work DrawBox procedure
 
 NewHandler09h	endp
 
@@ -250,6 +280,51 @@ ReplaceSave08h09h proc
 		ret
 		endp
 
+;-------------------------------------------------
+; Compare videobuffer with buffer and replace differences
+; Entry: ES:[SI] - videobuffer
+; 	 DS:[DI] - buffer that will be used to compare elements
+; 	 DS:[BX] - buffer to write differences
+; 	 CX	 - videobuffer width
+; 	 DX	 - videobuffer length
+
+CmpBuffer	proc
+		mov ax, cx
+		mov bp, di
+		jmp @@Compare
+
+@@GoToNextLine:
+		mov cx, ax
+		add si, 160
+		sub si, cx
+		sub si, cx
+
+@@Compare:
+		dec cx
+		cmpsw
+		jne @@NoDiff
+
+
+		sub di, 2
+		sub si, 2
+
+		sub di, bp
+		add bx, di
+		mov bp, di
+
+		xchg bx, di
+		movsw
+		xchg bx, di
+
+@@NoDiff:
+		cmp cx, 0
+		ja @@Compare
+		dec dx
+		ja @@GoToNextLine
+
+
+		ret
+		endp
 
 include ./4.ASM
 include ./STRING1.ASM
