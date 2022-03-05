@@ -10,15 +10,20 @@ HotkeyPressed    equ '#'
 HotkeyUnPressed  equ '$'
 F3Hotkey	 equ 03Dh        ; F3 scan code
 OneIntSize	 equ 004h	; One interruption in interrupt table include segment register (cs) and offset (ip) = 4 byte
-
 TableColor       equ 01Ah
 TableWidth	 equ 00Bh
-
 TableHeight	 equ 00Ah
 TablePos	 equ 140*2
 ColumnPos	 equ 81*2
 AXInBuffPos	 equ TableWidth*2 + 8
 RegisterCount	 equ 008h
+NextLineOffset   equ 160
+
+;-------------------------------------------------
+; Save table with TablePos, TableWidth TableHeight to Buffer (BufferName)
+; Entry: BufferName - name of buffer to save videomemory
+; Destr: BX, DS, ES, CX, SI, DI, DX
+;
 
 .SaveBuffer	macro BufferName
 		mov bx, 0B800h	; Change ds = 0B800h
@@ -38,6 +43,8 @@ RegisterCount	 equ 008h
 		endm
 ;-------------------------------------------------
 ; Macros to output buffer to videobuffer
+; All settings are setted with TableWidht, TableHeight, TablePos
+; Entry: BufferName - buffer to output in videobuffer
 ; Destr: BX, DS, ES, CX, BX, DI, SI
 
 
@@ -55,6 +62,31 @@ RegisterCount	 equ 008h
 		lea si, BufferName
 
 		call OutTable
+		endm
+
+;-------------------------------------------------
+; Macros to compare videobuffer with ToCmpBuffer and write difference to DstBuffer
+; Entry: DstBuffer - buffer to write difference between ToCmpBuffer and VideoBuffer
+; 	 ToCmpBuffer - buffer which will compared with videobuffer
+; All settings are setted with TableWidth, TableHeight, TablePos
+; Destr:AX, BX, CX, DX, DI, SI, ES, DS
+
+.CmpBuffer	macro DstBuffer, ToCmpBuffer
+		mov bx, 0B800h
+		mov es, bx
+
+		push cs
+		pop ds
+
+		mov cx, TableWidth
+		mov dx, TableHeight
+
+		lea bx, DstBuffer
+		lea di, ToCmpBuffer
+
+		mov si, TablePos
+
+		call CmpBuffer
 
 		endm
 
@@ -64,8 +96,10 @@ RegisterCount	 equ 008h
 ; ReplaceHandler - Name of procedure that will be replaced in interruption table
 ; SaveHandler    - Name of buffer, where will be saved info about system handler of interruption
 ; Note: You should write cli - sti by your own to correct work, and es should be zeroed!
-;
+; Destr: AX
+
 ReplaceSaveInt  macro IntNamePos, ReplaceHandler, SaveHandler
+
 		mov ax, es:[IntNamePos * OneIntSize]
 		mov word ptr SaveHandler, ax
 
@@ -81,11 +115,9 @@ ReplaceSaveInt  macro IntNamePos, ReplaceHandler, SaveHandler
 
 		endm
 
-			
 
 start:
-
-                call ReplaceSave08h09h
+		call ReplaceSave08h09h
 
 
                 mov ax, 3100h	; Exit, but stay resident
@@ -116,11 +148,10 @@ NewHandler08h	proc
 
 		push ax bx cx dx si di es ds ; Register to output info
 
+		.CmpBuffer BackBuffer, DisplayBuffer
 
 		mov bp, RegisterCount
 
-		;; push cs
-		;; pop  ds
 
 		push cs
 		pop  es
@@ -191,6 +222,7 @@ NewHandler09h	proc
 	;; --------------------------------------
 	;; 	First press
 		.SaveBuffer BackBuffer
+
 		push cs
 		pop ds
 
@@ -243,9 +275,9 @@ NewHandler09h	proc
 		iret
 
 		HotkeyPress   db HotkeyUnPressed
-		BackBuffer    db 220 dup(?)
-		DisplayBuffer db 220 dup(?)
-		Registers     db 'AXBXCXDXSIDIESDS$'
+		BackBuffer    db 220 dup(?) ; Buffer to save "Back". Save what's under the table
+		DisplayBuffer db 220 dup(?) ; Save current table
+		Registers     db 'AXBXCXDXSIDIESDS$' ; To output register names
 
                 BoxFill        db ' ∫∫»Õº…Õª' ; Element used to draw the box
 		UselessString  db '$$$'	      ; This string need only for correct work DrawBox procedure
@@ -287,41 +319,36 @@ ReplaceSave08h09h proc
 ; 	 DS:[BX] - buffer to write differences
 ; 	 CX	 - videobuffer width
 ; 	 DX	 - videobuffer length
+; Destr: AX, CX, DX, BX, SI, DI
 
 CmpBuffer	proc
-		mov ax, cx
-		mov bp, di
+		mov ax, cx	; Save cx
+
 		jmp @@Compare
 
 @@GoToNextLine:
-		mov cx, ax
-		add si, 160
+		mov cx, ax	; Get back cx value
+
+		add si, NextLineOffset ; Go to next line in videobuffer
 		sub si, cx
 		sub si, cx
 
 @@Compare:
-		dec cx
-		cmpsw
-		jne @@NoDiff
+		mov bp, es:[si]	 	; Compare videobuffer with buffer
+		cmp ds:[di], bp
+		je @@NotWrite
 
+		mov ds:[bx], bp	; Write result to additional buffer
 
-		sub di, 2
-		sub si, 2
+@@NotWrite:
+		add bx, 2	; Go to next element
+		add di, 2
+		add si, 2
 
-		sub di, bp
-		add bx, di
-		mov bp, di
+		loop @@Compare
 
-		xchg bx, di
-		movsw
-		xchg bx, di
-
-@@NoDiff:
-		cmp cx, 0
-		ja @@Compare
 		dec dx
-		ja @@GoToNextLine
-
+		jne @@GoToNextLine
 
 		ret
 		endp
